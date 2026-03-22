@@ -1,0 +1,72 @@
+--Input Buffer:It buffers compressed bytes coming from an external source and decouples input timing from the bit-serial decoder.
+--This is a classical synchronous FIFO buffer
+--Purpose:Buffers compressed byte stream ,Decouples input timing from decoder
+
+
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity fifo_8bit is
+    generic ( DEPTH : integer := 16 );  --Size: 16X8bits=128 bits
+    port (
+        clk : in std_logic;
+        rst : in std_logic;  -- async reset
+  
+        -- write side.write handshake
+        wr_valid : in  std_logic;   --Producer(Memory) has valid data.Interface with Memory where encoded data is stored.
+        wr_ready : out std_logic;   --FIFO can accept data.FIFO asserts when it is not full
+        data_in  : in  std_logic_vector(7 downto 0); --8-bit data width
+
+        -- read side.read handshake
+        rd_valid : out std_logic;  --FIFO has data.data is available
+        rd_ready : in  std_logic;  --when ready to receive.Consumer(Decoder) ready to receive.
+        data_out : out std_logic_vector(7 downto 0)
+    );
+end entity;
+
+architecture rtl of fifo_8bit is
+    type mem_t is array (0 to DEPTH-1) of std_logic_vector(7 downto 0);
+    signal mem : mem_t;  --storage: 16 X 8 bits=128 bits
+ --Pointers
+    signal wr_ptr : integer range 0 to DEPTH-1 := 0; --Points to the next write location in memory.Pointer Architecture (Ring Buffer)
+    signal rd_ptr : integer range 0 to DEPTH-1 := 0; --Points to the next read location
+    signal count  : integer range 0 to DEPTH := 0;  -- tracks number of stored elements
+
+    signal wr_ready_i : std_logic;
+    signal rd_valid_i : std_logic;
+begin
+
+    process(clk, rst)   --Edge-triggered (rising edge)
+    begin
+        if rst = '1' then   --Asynchronous reset
+            wr_ptr   <= 0;
+            rd_ptr   <= 0;
+            count    <= 0;
+            data_out <= (others => '0');
+
+        elsif rising_edge(clk) then 
+
+            if (wr_valid = '1') and (wr_ready_i = '1') then  --FIFO not full,Producer provides data.Write Logic
+                mem(wr_ptr) <= data_in;  --Store data_in at mem(wr_ptr)
+                wr_ptr <= (wr_ptr + 1) mod DEPTH;  --So the FIFO is implemented as a ring buffer.So the memory is used circularly.
+                count  <= count + 1;
+            end if;
+
+            if (rd_valid_i = '1') and (rd_ready = '1') then
+                data_out <= mem(rd_ptr);
+                rd_ptr <= (rd_ptr + 1) mod DEPTH;
+                count  <= count - 1;
+            end if;
+
+        end if;
+    end process;
+--Flow Control Logic
+    wr_ready_i <= '1' when count < DEPTH else '0';  --FIFO not full
+    rd_valid_i <= '1' when count > 0     else '0';
+
+    wr_ready <= wr_ready_i;
+    rd_valid <= rd_valid_i;
+
+end architecture;
+

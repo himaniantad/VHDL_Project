@@ -1,0 +1,85 @@
+--Byte to Bit Conversion.Since decoder is bit-serial, but input arrives as bytes.
+--1.FIFO for byte buffering
+--2.Shift register
+--3.Bit counter
+
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity rans_decoder_top is
+    port (
+        clk : in std_logic;
+        rst : in std_logic;
+
+        byte_in    : in  std_logic_vector(7 downto 0);
+        byte_valid : in  std_logic;
+        byte_ready : out std_logic;
+
+        symbol_out : out unsigned(1 downto 0);
+        sym_valid  : out std_logic
+    );
+end entity;
+
+architecture rtl of rans_decoder_top is
+
+    signal fifo_rd_valid : std_logic;
+    signal fifo_rd_ready : std_logic;
+    signal fifo_data     : std_logic_vector(7 downto 0);
+
+    signal shift_reg : std_logic_vector(7 downto 0);
+    signal bit_cnt   : integer range 0 to 8 := 0;
+    signal bit_in    : std_logic;
+    signal bit_valid : std_logic;
+
+begin
+
+    fifo_i : entity work.fifo_8bit
+        port map (
+            clk       => clk,
+            rst       => rst,
+            wr_valid  => byte_valid,
+            wr_ready  => byte_ready,
+            data_in   => byte_in,
+            rd_valid  => fifo_rd_valid,
+            rd_ready  => fifo_rd_ready,
+            data_out  => fifo_data
+        );
+
+    process(clk, rst)
+    begin
+        if rst = '1' then
+            shift_reg <= (others => '0');
+            bit_cnt   <= 0;
+            bit_valid <= '0';
+
+        elsif rising_edge(clk) then
+            bit_valid <= '0';
+
+            if bit_cnt = 0 and fifo_rd_valid = '1' then  --FIFO Control.Only read next byte when current byte is fully consumed.
+                shift_reg <= fifo_data;
+                bit_cnt <= 8;
+            end if;
+
+            if bit_cnt > 0 then
+                bit_in    <= shift_reg(7); --Bit Extraction Logic
+                shift_reg <= shift_reg(6 downto 0) & '0';  --This extracts MSB-first bits.Each byte produces 8 sequential bits.
+                bit_cnt   <= bit_cnt - 1;
+                bit_valid <= '1';
+            end if;
+        end if;
+    end process;
+
+    fifo_rd_ready <= '1' when bit_cnt = 0 else '0';
+
+    dec_i : entity work.rans_decoder
+        port map (
+            clk        => clk,
+            rst        => rst,
+            bit_in     => bit_in,
+            bit_valid  => bit_valid,
+            symbol_out => symbol_out,
+            sym_valid  => sym_valid
+        );
+
+end architecture;
